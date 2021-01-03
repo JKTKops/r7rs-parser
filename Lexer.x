@@ -100,8 +100,7 @@ $intraline_whitespace = [\ \t]
 -- though it were a hex literal, and then we check in the actions
 -- that the token contains characters from the radix it claims to
 -- use.
-@sign = $explicit_sign ?
--- note that @radix can match "" because of "#d"?
+@sign = $explicit_sign?
 @radix = (\# $radix_indicator)?
 @exactness = (\# $exactness_indicator)?
 
