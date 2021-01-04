@@ -148,6 +148,7 @@ tokens :-
   \{                        { lex' TokLBracket }
   \}                        { lex' TokRBracket }
   \# \(                     { lex' TokLVector }
+  \# "u8" \(                { lex' TokLByteVector }
   "'"                       { lex' TokQuote }
   "`"                       { lex' TokBackquote }
   ","                       { lex' TokComma }

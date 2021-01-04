@@ -1,6 +1,9 @@
 module Val where
 
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
+
+import Data.Word (Word8)
 
 data Val
   = Symbol String
@@ -17,6 +20,7 @@ data Val
   | Nil
   | IPair Val Val
   | IVector !(V.Vector Val)
+  | IByteVector !(U.Vector Word8)
   
   | Unspecified
   deriving Show
@@ -35,3 +39,6 @@ mkImpropList = flip $ foldr IPair
 
 mkVec :: [Val] -> Val
 mkVec = IVector . V.fromList
+
+mkByteVec :: [Word8] -> Val
+mkByteVec = IByteVector . U.fromList

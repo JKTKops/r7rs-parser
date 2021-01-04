@@ -16,6 +16,7 @@ module Parser where
 
 import Val
 import Lexer
+import Data.Ratio (numerator, denominator, (%))
 }
 
 %name parse
@@ -43,6 +44,7 @@ import Lexer
   '{'              { L pos TokLBrace }
   '}'              { L pos TokRBrace }
   '#('             { L pos TokLVector }
+  '#u8('           { L pos TokLByteVector }
 
   symbol           { L pos (TokSymbol $$) }
   number           { L pos (TokNumber $$) }
@@ -171,6 +173,7 @@ ListAux : DatumSeq                   { mkList $ reverse $1 }
 
 Vector :: { Val }
 Vector : '#(' DatumSeq ')'           { mkVec (reverse $2) }
+       | '#u8(' ByteSeq ')'          { mkByteVec (reverse $2) }
 
 DatumSeq :: { [Val] }
 DatumSeq : {- empty -}                    { [] }
@@ -179,6 +182,12 @@ DatumSeq : {- empty -}                    { [] }
 DatumSeq1 :: { [Val] }
 DatumSeq1 : DatumSeq CommentableDatum     { $2 : $1 }
           | DatumSeq1 DatumComment        { $1 }
+
+ByteSeq :: { [Byte] }
+ByteSeq : {- empty -}                     { [] }
+        | ByteSeq number                  {% do 
+                                               byte <- validateByte pos $2 
+                                               return (byte : $1) }
 
 PrefixSugar :: { Token }
 PrefixSugar : quote                  { $1 }
@@ -211,5 +220,30 @@ numericToNumber :: Numeric -> Number
 numericToNumber (LitInteger i)  = Bignum i
 numericToNumber (LitRational r) = Ratnum r
 numericToNumber (LitFloating f) = Flonum f
-  
+
+validateByte :: AlexPosn -> Numeric -> Alex Byte
+validateByte p n = case n of
+  LitInteger i -> checkSize i
+  LitRational r
+    | denominator r == 1 -> checkSize $ numerator r
+    | otherwise -> fail
+  LitComplex real imag -> do checkExactZero imag
+                             validateByte p real
+  _other -> fail
+  where
+    checkSize :: Integer -> Alex Byte
+    checkSize i
+      | i >= 0 && i <= 255 = return $ fromInteger i
+      | otherwise = fail
+
+    checkExactZero :: Numeric -> Alex ()
+    checkExactZero (LitInteger 0) = pure ()
+    checkExactZero (LitRational r)
+      | r == 0 % 1 = pure ()
+      | otherwise = fail
+    checkExactZero _ = fail
+
+    fail :: Alex a
+    fail = alexErrorWithPos p $ show n ++ " is not an exact byte value"
+
 }
