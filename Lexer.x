@@ -20,9 +20,11 @@ module Lexer where
 
 import Prelude hiding (lex)
 
+import Data.CaseInsensitive (foldCase)
 import Data.Char
 import Data.Maybe (fromJust)
 import Data.Ratio
+import qualified Data.Set as S
 import Text.Read (readMaybe)
 import Control.Applicative ((<|>))
 import qualified Data.IntMap as M
@@ -63,10 +65,10 @@ $radix_indicator = [bodxBODX]
 
 $intraline_whitespace = [\ \t]
 
+$delimiter = [$white \| \( \) \; \"]
+
 -------------------------------------------------------------------------------
 -- Regex macros
-
-@delimiter = $white | "|" | \( | \) | \; | \"
 
 @inline_hex_escape = \\x $hex_digit + \;
 @mnemonic_escape = \\a | \\b | \\t | \\n | \\r
@@ -153,7 +155,7 @@ tokens :-
   "`"                       { lex' TokBackquote }
   ","                       { lex' TokComma }
   ",@"                      { lex' TokCommaAt }
-  "." /@delimiter           { lex' TokDot }
+  "." /$delimiter           { lex' TokDot }
   "#;"                      { lex' TokDatumComment }
   
   \# $dec_digit+ \=         { lex tokLabelDef }
@@ -170,14 +172,16 @@ tokens :-
   -- to go. 'lexNumeric' would have to check if that setting is on to decide
   -- if '#' triggers 'mightBeSymbol' or not. '#' can be safely added back
   -- to $initial with no other complications afaik.
-  "#f"      /@delimiter     { lex' (TokBool False) }
-  "#false"  /@delimiter     { lex' (TokBool False) }
-  "#t"      /@delimiter     { lex' (TokBool True) }
-  "#true"   /@delimiter     { lex' (TokBool True) }
+  "#f"      /$delimiter     { lex' (TokBool False) }
+  "#false"  /$delimiter     { lex' (TokBool False) }
+  "#t"      /$delimiter     { lex' (TokBool True) }
+  "#true"   /$delimiter     { lex' (TokBool True) }
 
-  \# \\ .              /@delimiter { lexChar }
-  \# \\ x $hex_digit+  /@delimiter { unicodeEscapeChar }
-  \# \\ $letter+       /@delimiter { namedChar }
+  \# \\ .              /$delimiter { lexChar }
+  \# \\ x $hex_digit+  /$delimiter { unicodeEscapeChar }
+  \# \\ $letter+       /$delimiter { namedChar }
+
+  \# \! $initial $subsequent+ /$delimiter { directive }
 
   \"                        { begin string }
 
@@ -188,29 +192,29 @@ tokens :-
   -- the lexer will match in @prefix @int_hex instead.
   @dec_prefix @int_hex
     @explicit_suffix
-      /@delimiter           { lexNumeric tokDecimal }
+      /$delimiter           { lexNumeric tokDecimal }
   @prefix @int_hex      
-      /@delimiter           { lexNumeric tokInt }
+      /$delimiter           { lexNumeric tokInt }
   @prefix @decimal_hex
-      /@delimiter           { lexNumeric tokDecimal }
+      /$delimiter           { lexNumeric tokDecimal }
   @prefix @rational_hex
-      /@delimiter           { lexNumeric tokRational }
+      /$delimiter           { lexNumeric tokRational }
   @prefix @infnan         
-      /@delimiter           { lexNumeric tokInfnan }
+      /$delimiter           { lexNumeric tokInfnan }
   
   @prefix 
     @real_hex \@ @real_hex
-      /@delimiter           { lexNumeric tokComplexPolar }
+      /$delimiter           { lexNumeric tokComplexPolar }
   @prefix @complex_hex
-      /@delimiter           { lexNumeric tokComplex }
+      /$delimiter           { lexNumeric tokComplex }
   
   -- Previously, the first two cases were above numbers with a note about
   -- some weird overlap because we lex all number as hex numbers.
   -- This is no longer a problem, because 'lexNumeric' will fall back to
   -- outputting a symbol if the token can't be read as a number.
   "|"                      { begin litSymbol }
-  $initial $subsequent*    { lex TokSymbol }
-  @peculiar_identifier      { lex TokSymbol }
+  $initial $subsequent*    { lexFolded TokSymbol }
+  @peculiar_identifier     { lexFolded TokSymbol }
 }
 
 <string> {
@@ -264,6 +268,10 @@ data PState
              -- | Used while tokenizing strings and vertical-bar identifiers
              -- as scratch space to build a string.
            , scratch_space :: String
+
+             -- | To integrate with a Scheme implementation, this should be
+             -- replaced by a set of flags as appropriate.
+           , fold_case :: Bool
            }
 
 initializePState :: Labels -> PState
@@ -274,6 +282,7 @@ initializePState completeMap
            , block_comment_depth = 0
            , defining_label = Nothing
            , scratch_space = ""
+           , fold_case = False
            }
 
 type Labels = M.IntMap Val
@@ -285,7 +294,7 @@ alexInitUserState = error "someone used runAlex. Use runAlex' instead!"
 runAlex' :: Alex a -> String -> Either String a
 runAlex' (Alex f) input =
   let r = f AlexState { alex_pos = alexStartPos
-                        -- append a newline so that @delimiter doesn't choke on EOF
+                        -- append a newline so that $delimiter doesn't choke on EOF
                       , alex_inp = input ++ "\n"
                       , alex_chr = '\n'
                       , alex_bytes = []
@@ -422,6 +431,11 @@ lex f = \(p,_,_,s) i -> return $ L p (f (take i s))
 lex' :: Token -> AlexAction Lexeme
 lex' = lex . const
 
+lexFolded :: (String -> Token) -> AlexAction Lexeme
+lexFolded f = \(p,_,_,s) i -> do
+  fold <- getFoldFun
+  return $ L p $ f $ fold $ take i s
+
 partialLex :: AlexAction a -> AlexAction Lexeme
 partialLex act = \s i -> act s i >> skip s i
 
@@ -433,6 +447,20 @@ alexEOF = do
 tokLabelDef, tokLabelRef :: String -> Token
 tokLabelDef ('#' : tl) = TokLabelDef $ read $ init tl
 tokLabelRef ('#' : tl) = TokLabelRef $ read $ init tl
+
+directive :: AlexAction Lexeme
+directive = \a@(p,_,_,s) i -> do
+  let name = drop 2 $ take i s
+  case name of
+    "fold-case" -> alexModify $ \s -> s { fold_case = True }
+    "no-fold-case" -> alexModify $ \s -> s { fold_case = False }
+    other -> alexErrorWithPos p $ "unrecognized directive: " ++ other
+  skip a i
+
+getFoldFun :: Alex (String -> String)
+getFoldFun = do
+  fold <- fold_case <$> alexGet
+  return $ if fold then foldCase else id
 
 -------------------------------------------------------------------------------
 -- Tokenizing Strings
@@ -477,7 +505,8 @@ endSymbol = \(p,_,_,_) _ -> do
   scratch <- scratch_space <$> alexGet
   modifyScratchSpace $ const ""
   alexSetStartCode 0
-  return $ L p $ TokSymbol $ reverse scratch
+  fold <- getFoldFun
+  return $ L p $ TokSymbol $ fold $ reverse scratch
 
 -------------------------------------------------------------------------------
 -- Character tokens
@@ -500,10 +529,11 @@ charNames =
   ]
 
 namedChar :: AlexAction Lexeme
-namedChar = \(p,_,_,s) i ->
+namedChar = \(p,_,_,s) i -> do
+  fold <- getFoldFun
   let name = drop 2 $ take i s
-      mchar = lookup name charNames
-  in case mchar of
+      mchar = lookup (fold name) charNames
+  case mchar of
     Just c  -> return $ L p $ TokChar c
     Nothing -> alexErrorWithPos p $ "unknown character name: " ++ name
 

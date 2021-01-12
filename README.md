@@ -6,10 +6,7 @@ Thcheme, but is not included there currently as Thcheme does not support all
 of the features of R7RS that this parser is capable of accepting (such as complex
 numbers).
 
-This parser aims to parse all of R7RS-small Scheme. Currently, only bytevectors
-and directives are outstanding. Attempting to parse a #!fold-case directive will
-cause a lexical error. Unrecognized directives will be treated as errors when
-they are added.
+This parser aims to parse all of R7RS-small Scheme. To my knowledge, it is functional.
 
 If you play with the parser and notice any bugs, please let me know!
 
