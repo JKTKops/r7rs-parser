@@ -2,6 +2,7 @@ module Val where
 
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
+import Data.Complex
 
 import Data.Word (Word8)
 
@@ -11,11 +12,7 @@ data Val
   | Char Char
   | Bool Bool
 
-    -- ideally we'd unpack these, but GHC still doesn't support
-    -- unpacking sum type constructors into a bigger type.
-    -- That's unfortunate but understandable :/
   | Number !Number
-  | Complex !Number !Number
 
   | Nil
   | IPair Val Val
@@ -26,6 +23,11 @@ data Val
   deriving Show
 
 data Number
+  = Real RealNumber
+  | Complex (Complex RealNumber)
+  deriving Show
+
+data RealNumber
   = Bignum {-# UNPACK #-}!Integer
   | Flonum {-# UNPACK #-}!Double
   | Ratnum {-# UNPACK #-}!Rational

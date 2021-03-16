@@ -17,6 +17,7 @@ module Parser where
 import Val
 import Lexer
 import Data.Ratio (numerator, denominator, (%))
+import Data.Complex (Complex(..))
 }
 
 %name parse
@@ -211,12 +212,13 @@ prefix tok v = mkList [Symbol (desugar tok), v]
     desugar TokCommaAt   = "unquote-splicing"
 
 mkNumber :: Numeric -> Val
-mkNumber (LitInteger i)  = Number $ Bignum i
-mkNumber (LitRational r) = Number $ Ratnum r
-mkNumber (LitFloating f) = Number $ Flonum f
-mkNumber (LitComplex l r) = Complex (numericToNumber l) (numericToNumber r)
+mkNumber (LitInteger i)  = Number $ Real $ Bignum i
+mkNumber (LitRational r) = Number $ Real $ Ratnum r
+mkNumber (LitFloating f) = Number $ Real $ Flonum f
+mkNumber (LitComplex l r) = Number $ Complex $ 
+  (numericToNumber l) :+ (numericToNumber r)
 
-numericToNumber :: Numeric -> Number
+numericToNumber :: Numeric -> RealNumber
 numericToNumber (LitInteger i)  = Bignum i
 numericToNumber (LitRational r) = Ratnum r
 numericToNumber (LitFloating f) = Flonum f
